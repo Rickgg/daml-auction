@@ -1,0 +1,106 @@
+module Main where
+ 
+import Daml.Script
+
+template Auction
+    with
+        owner : Party
+        name : Text
+        active : Bool
+    where
+        ensure name /= ""
+        signatory owner
+
+        choice EndAuction : ContractId AuctionResult
+            with 
+                winner : Party
+            controller owner
+            do
+                create this with active = False
+                create AuctionResult with auction = this, winner = winner
+
+        nonconsuming choice InviteBidder : ContractId AuctionInvite
+            with
+                invited: Party
+            controller owner
+            do
+                create AuctionInvite with auction = this, buyer = invited
+
+template AuctionInvite
+    with
+        auction : Auction
+        buyer : Party
+    where
+        signatory auction.owner
+        observer buyer
+        choice CreateBid: ContractId AuctionBid
+            with amount: Decimal 
+            controller buyer 
+            do 
+                assert(auction.active)
+                create AuctionBid with auction, issuer = buyer, amount = amount
+
+
+template AuctionBid
+    with
+        issuer : Party
+        amount : Decimal
+        auction : Auction 
+    where
+        ensure amount > 0.0
+        observer auction.owner
+        signatory issuer
+
+template AuctionResult
+    with
+        winner: Party
+        auction: Auction
+    where
+        signatory auction.owner
+        observer winner
+        
+
+auction_test_1 : Script ()
+auction_test_1 = script do
+    alice <- allocateParty "Alice"
+    bob <- allocateParty "Bob"
+    alex <- allocateParty "Alex"
+    cynthia <- allocateParty "Cynthia"
+
+    test_auction <- submit alice do
+        createCmd Auction with 
+            owner = alice
+            name = "Test Auction"
+            active = True
+
+    invite_bob <- submit alice do
+        exerciseCmd test_auction InviteBidder with
+            invited = bob
+
+    invite_alex <- submit alice do
+        exerciseCmd test_auction InviteBidder with
+            invited = alex
+
+    invite_cynthia <- submit alice do
+        exerciseCmd test_auction InviteBidder with
+            invited = cynthia
+
+    bid_1 <- submit bob do
+        exerciseCmd invite_bob CreateBid with
+            amount = 10.0
+
+    bid_2 <- submit alex do
+        exerciseCmd invite_alex CreateBid with
+            amount = 20.0
+
+    bid_3 <- submit cynthia do
+        exerciseCmd invite_cynthia CreateBid with
+            amount = 25.0
+
+    auctionResult <- submit alice do
+        exerciseCmd test_auction EndAuction with
+            winner = cynthia
+
+    return ()
+
+    
